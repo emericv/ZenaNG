@@ -100,7 +100,6 @@
 #define APP_NAME "zena"
 #define VERSION "0.4.3, 16 Feb 2012"
 #define USB_VENDOR_ID 0x04d8   // Microchip Technologies Inc
-#define USB_PRODUCT_ID 0x0e00  // ZENA
 #define INTERFACE 0
 
 #define FORMAT_PCAP 1
@@ -111,7 +110,7 @@
 
 // Used by zena_get_packet() to return 802.15.4 packet data
 typedef struct  {
-    int zena_ts_sec;	// time stamp reported by ZENA (seconds)
+	int zena_ts_sec;	// time stamp reported by ZENA (seconds)
 	int zena_ts_usec;	// time stamp reported by ZENA (microseconds)
 	int host_ts_sec;	// time stamp reported by host (seconds)
 	int host_ts_usec;	// time stamp reported by host (microseconds)
@@ -123,21 +122,36 @@ typedef struct  {
 } zena_packet_t;
 
 typedef struct  {
+	int product_id;
 	int (*transfer) 
 	(struct libusb_device_handle *dev_handle, unsigned char endpoint, 
 						unsigned char *data, int length, int *transferred, 
 						unsigned int timeout);
 	int ep_packets;
 	int ep_control;
+	int header_len;
+	int first_block_max_len;
 } zena_dev_profile_t;
 
-const static zena_dev_profile_t profile_ng = {
-	libusb_bulk_transfer,
-	0x82,
-	0x01
+const static zena_dev_profile_t dev_profile = {
+	0x000e,
+	libusb_interrupt_transfer,
+	0x81,
+	0x01,
+	6,
+	58					// 64 - 6
 };
 
-const static zena_dev_profile_t *selected_profile = &profile_ng;
+const static zena_dev_profile_t dev_profile_ng = {
+	0x0e00,
+	libusb_bulk_transfer,
+	0x82,
+	0x01,
+	7,
+	57					// 64 - 7
+};
+
+const static zena_dev_profile_t *selected_profile = &dev_profile_ng;
 
 const static int TIMEOUT=200; // Default USB timeout in ms
 const static int PACKET_FRAG_TIMEOUT = 100; // USB timeout when retrieving 2nd or 3rd part of packet
@@ -204,7 +218,7 @@ libusb_device_handle *setup_libusb_access() {
 	libusb_set_debug (NULL, (debug_level == 0 ? 0 : 3) );
 
 	debug (1, "calling libusb_open_device_with_vid_pid() to open USB device handle to ZENA");
-	zena = libusb_open_device_with_vid_pid (NULL, USB_VENDOR_ID, USB_PRODUCT_ID);
+	zena = libusb_open_device_with_vid_pid (NULL, USB_VENDOR_ID, selected_profile->product_id);
 	if (zena == NULL) {
 		fprintf (stderr,"ERROR: Could not open ZENA device. Not found or not accessible.\n");
 		return NULL;
@@ -355,7 +369,7 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 	zena_packet->zena_ts_sec = (int)usbbuf[3]  | ( ((int)usbbuf[4])<<8 );
 	zena_packet->zena_ts_usec = ( ((int)usbbuf[1])  | ( ((int)usbbuf[2])<<8 )) * 15; //approx
 	
-	data_len = usbbuf[6];
+	data_len = usbbuf[selected_profile->header_len - 1];
 
 	// Check for invalid packet lengths
 	if (data_len > 129) {
@@ -368,13 +382,13 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 
 	// Write packet data. This is a little messy because of long packets that don't fit in one
 	// chunk of 64 byte USB data.
-	if (data_len <= 58) {
+	if (data_len <= selected_profile->first_block_max_len) {
 		// short packet -- easy!
-		memcpy (zena_packet->packet, usbbuf+7, data_len);
+		memcpy (zena_packet->packet, usbbuf + selected_profile->header_len, data_len);
 
 	} else {
 
-		memcpy (zena_packet->packet, usbbuf+7, 58);
+		memcpy (zena_packet->packet, usbbuf + selected_profile->header_len, selected_profile->first_block_max_len);
 
 		debug (1, "calling libusb_transfer() for second part of packet");
 		status = selected_profile->transfer(zena, selected_profile->ep_packets, usbbuf, 64, &nbytes, PACKET_FRAG_TIMEOUT);
@@ -387,12 +401,12 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 			return status;
 		}
 
-		int bytesRemaining = data_len - 58;
+		int bytesRemaining = data_len - selected_profile->first_block_max_len;
 		if ( bytesRemaining <= 63 ) {
-			memcpy (zena_packet->packet+58, usbbuf+1, bytesRemaining);
+			memcpy (zena_packet->packet + selected_profile->first_block_max_len, usbbuf + 1, bytesRemaining);
 		} else {
 			// long packet -- will need third libusb_transfer()
-			memcpy (zena_packet->packet+58, usbbuf+1, 63);
+			memcpy (zena_packet->packet+selected_profile->first_block_max_len, usbbuf + 1, 63);
 			bytesRemaining -= 63;
 						
 			debug (1, "calling libusb_transfer() for third part of packet");
@@ -405,7 +419,7 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 				return status;
 			}
 
-			memcpy (zena_packet->packet+58+63, usbbuf+1, bytesRemaining);
+			memcpy (zena_packet->packet + selected_profile->first_block_max_len + 63, usbbuf + 1, bytesRemaining);
 		}
 	}
 
