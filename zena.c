@@ -376,9 +376,6 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 		warning("Packet too long, length=%d. Ignoring.\n",data_len);
 		return -3;
 	}
-	
-	// 802.15.4 packet len = data_len -2 because last two bytes from ZENA data are RSSI, LQI/FCS_OK
-	//packet_len = data_len - 2; 			
 
 	// Write packet data. This is a little messy because of long packets that don't fit in one
 	// chunk of 64 byte USB data.
@@ -406,7 +403,7 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 			memcpy (zena_packet->packet + selected_profile->first_block_max_len, usbbuf + 1, bytesRemaining);
 		} else {
 			// long packet -- will need third libusb_transfer()
-			memcpy (zena_packet->packet+selected_profile->first_block_max_len, usbbuf + 1, 63);
+			memcpy (zena_packet->packet + selected_profile->first_block_max_len, usbbuf + 1, 63);
 			bytesRemaining -= 63;
 						
 			debug (1, "calling libusb_transfer() for third part of packet");
