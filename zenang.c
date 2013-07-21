@@ -1,91 +1,24 @@
 /**
- * Zena Linux - a command line utility to interact with the Microchip
- * Technologies ZENA 2.5GHz 802.15.4 packet sniffer. Project hosted at
- * http://code.google.com/p/microchip-zena/
- *
+ * ZenaNG Linux - a command line utility to interact with the Microchip
+ * Technologies ZENA 2.5GHz 802.15.4 packet sniffer.
+ * This tool support both bersion sniffer
+ * * Old hardware based on CC2420 chip.
+ * * Next gen hardware based on MRF24J40 chip 
+ * 
  * Copyright (c) 2011,2012, Joe Desbonnet, jdesbonnet@gmail.com
+ * Copyright (c) 2013, Emeric Verschuur, emericv@gmail.com
  * 
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- * 
- * * Redistributions of source code must retain the above copyright notice,
- *   this list of conditions and the following disclaimer.
- * * Redistributions in binary form must reproduce the above copyright
- *   notice, this list of conditions and the following disclaimer in the
- *   documentation and/or other materials provided with the distribution.
- * * The name of the contributors may not be used to endorse or promote
- *   products derived from this software without specific prior written
- *   permission.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ *   you may not use this file except in compliance with the License.
+ *   You may obtain a copy of the License at
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
- * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
- * OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *         http://www.apache.org/licenses/LICENSE-2.0
  *
- * Special thanks to Joshua Wright who did much of the initial reverse 
- * engineering work on the Microchip ZENA. See this post for details:
- * http://www.willhackforsushi.com/?p=198
- *
- * Version 0.1 (16 Feb 2011)
- * First release. Used libusb 0.1.
- *
- * Version 0.2 (19 Feb 2011) 
- * Identical in functionality to verion 0.1 except that it
- * uses libusb version 1.0 API (the previous version used libusb v0.1). 
- *
- * Version 0.3 (25 Feb 2011)  (CVS file version 1.52)
- * * Add 802.15.4 channel to usbhex records as the second item in the
- * record after the packet timestamp (in hex). This ensure that all
- * packet data and metadata (reception, channel, timestamp) is
- * recorded. 
- * * If ZENA is bound to a kernel driver, it will attempt to detach
- * it from the kernel driver. Up do now this had to be done manually
- * prior to running this utility.
- * * Use host timestamp in pcap file instead of ZENA timestamp.
- * * -s <t> switch to scan through 802.15.4 channels, where t = channel
- * time slice in ms.
- *
- * Version 0.4 (1 Mar 2011)  (CVS file version 1.61)
- * * Add signal handler for graceful exit.
- * * Buffer entire 802.15.4 packet and check if suitable for outputting
- * to pcap file. Drop corrupted packets by default. Use -b to override.
- * * Use -q to suppress warning messages.
- *
- * Version 0.4.1 (20 Mar 2011) (CVS file version 1.63)
- * * Remove call to zena_get_packet() just before the output format switch
- * statement in the main loop. This was unnecessary and would have resulted
- * in lost packets.
- *
- * Version 0.4.2 (2 Feb 2012) (CVS file version 1.68)
- * Change way packets with bad FCS are handled when writing PCAP. There was 
- * bug where the packet written to the PCAP file was two bytes shorter than 
- * that declared in the header when FCS was bad and 'drop bad packets' flag
- * was disabled.
- *
- * Version 0.4.3 (16 Feb 2012) (CVS file version 1.70)
- * Check zena_packet.packet_len is a sane value. Occasionally getting crazy
- * lengths which causes SEGV when accessing the zena_packet.packet[] buffer.
- *
- * TODO: 
- * * Option to use ZENA or host timestamp 
- *
- * Requires libusb-1.0 (to run) and libusb-1.0-dev (to compile) packages. 
- *
- * To compile:
- * gcc -o zena zena.c -lusb-1.0 -lrt
- *
- * Known issue: can cause Ubuntu 10.x running Linux 2.6.32-* to kernel crash! 
- * Cause unknown. A fresh Ubuntu 10.10 installed from CD running 2.6.35-22 
- * does not seem to have this problem. Suggest running in a virtual machine.
- *
+ *   Unless required by applicable law or agreed to in writing, software
+ *   distributed under the License is distributed on an "AS IS" BASIS,
+ *   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *   See the License for the specific language governing permissions and
+ *   limitations under the License.
  */
 
 #include <stdio.h>
@@ -98,7 +31,7 @@
 #include <libusb-1.0/libusb.h>
 
 #define APP_NAME "zena"
-#define VERSION "0.4.3, 16 Feb 2012"
+#define VERSION "0.5.0, 22 Jul 2013"
 #define USB_VENDOR_ID 0x04d8   // Microchip Technologies Inc
 #define INTERFACE 0
 
@@ -107,6 +40,11 @@
 
 #define TRUE 1
 #define FALSE 0
+
+#define ZENA_HW_PID 0x000e
+#define ZENA_NG_HW_PID 0x0e00
+
+#define HAS_FCS_FIELD 0x00000001
 
 #define min(val1, val2) (val1 < val2 ? val1 : val2)
 
@@ -125,6 +63,7 @@ typedef struct  {
 
 typedef struct  {
 	int product_id;
+	int flags;
 	int (*transfer) 
 	(struct libusb_device_handle *dev_handle, unsigned char endpoint, 
 						unsigned char *data, int length, int *transferred, 
@@ -137,7 +76,8 @@ typedef struct  {
 } zena_dev_profile_t;
 
 const static zena_dev_profile_t dev_profile = {
-	0x000e,
+	ZENA_HW_PID,
+	0,
 	libusb_interrupt_transfer,
 	0x81,
 	0x01,
@@ -147,7 +87,8 @@ const static zena_dev_profile_t dev_profile = {
 };
 
 const static zena_dev_profile_t dev_profile_ng = {
-	0x0e00,
+	ZENA_NG_HW_PID,
+	HAS_FCS_FIELD,
 	libusb_bulk_transfer,
 	0x82,
 	0x01,
@@ -393,30 +334,39 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 	int nb_read = min(bytesRemaining, fragMaxLen);
 	memcpy (zena_packet->packet, usbbuf + selected_profile->header_len, nb_read);
 	bytesRemaining -= nb_read;
-	int write_offset = nb_read;
-	fragMaxLen = 64 - selected_profile->data_offset;
 	
-	while (bytesRemaining > 0) {
-		status = selected_profile->transfer(zena, selected_profile->ep_packets, usbbuf, 64, &nbytes, PACKET_FRAG_TIMEOUT);
+	if (bytesRemaining > 0) {
+		int write_offset = nb_read;
+		fragMaxLen = 64 - selected_profile->data_offset;
+		while (bytesRemaining > 0) {
+			status = selected_profile->transfer(zena, selected_profile->ep_packets, usbbuf, 64, &nbytes, PACKET_FRAG_TIMEOUT);
 
-		// A status < 0 here will be problematic. Likely that the data will be corrupted. But
-		// as the packet header is already written, might as well write what's in the buffer 
-		// and display a warning message.
-		if (status < 0) {
-			warning ("libusb_transfer() returned status=%d during second chunk of long packet\n", status);
-			return status;
+			// A status < 0 here will be problematic. Likely that the data will be corrupted. But
+			// as the packet header is already written, might as well write what's in the buffer 
+			// and display a warning message.
+			if (status < 0) {
+				warning ("libusb_transfer() returned status=%d during second chunk of long packet\n", status);
+				return status;
+			}
+			
+			nb_read = min(bytesRemaining, fragMaxLen);
+			memcpy (zena_packet->packet + write_offset, usbbuf + selected_profile->data_offset, nb_read);
+			bytesRemaining -= nb_read;
+			write_offset += nb_read;
 		}
-		
-		nb_read = min(bytesRemaining, fragMaxLen);
-		memcpy (zena_packet->packet + write_offset, usbbuf + selected_profile->data_offset, nb_read);
-		bytesRemaining -= nb_read;
-		write_offset += nb_read;
 	}
 
-	zena_packet->rssi = zena_packet->packet[data_len-2];
-	zena_packet->lqi = zena_packet->packet[data_len-1]&0x7f;
-	zena_packet->fcs_ok = zena_packet->packet[data_len-1]&80 ? TRUE : FALSE;
-	zena_packet->packet_len = data_len - selected_profile->footer_len;
+	if (selected_profile->product_id == ZENA_HW_PID) { // hold HW
+		zena_packet->rssi = zena_packet->packet[data_len-2];
+		zena_packet->lqi = zena_packet->packet[data_len-1]&0x7f;
+		zena_packet->fcs_ok = zena_packet->packet[data_len-1]&80 ? TRUE : FALSE;
+		zena_packet->packet_len = data_len - 2;
+	} else { // Next gen HW
+		zena_packet->rssi = zena_packet->packet[data_len-1];
+		zena_packet->lqi = zena_packet->packet[data_len-2];
+		zena_packet->fcs_ok = TRUE; // TODO: compute it from bytes data_len-4 and data_len-3
+		zena_packet->packet_len = data_len - 2;
+	}
 
 	return 0;
 }
@@ -742,26 +692,33 @@ int main( int argc, char **argv) {
 				fwrite (&zena_packet.host_ts_sec, sizeof(int), 1, stdout);	// ts_sec: timestamp seconds
 				fwrite (&zena_packet.host_ts_usec, sizeof(int), 1, stdout);	// ts_usec: timestamp microseconds
 
-				// Small problem re FCS. ZENA does not provide this information.
+				if (selected_profile->flags & HAS_FCS_FIELD) {
+					fwrite (&zena_packet.packet_len, sizeof(int), 1, stdout);
+					fwrite (&zena_packet.packet_len, sizeof(int), 1, stdout);
+					zena_packet.packet[zena_packet.packet_len] = 0;
+					zena_packet.packet[zena_packet.packet_len+1] = 0;
+					fwrite (zena_packet.packet, 1, zena_packet.packet_len, stdout);
+				} else 
+					
+				// Small problem re FCS. Old HW ZENA does not provide this information.
 				// Solution is in the case of a good packet not to include FCS
 				// and Wireshark will ignore it. In the case were the FCS is 
 				// known to be bad, we'll include a deliberatly wrong FCS. For
 				// the moment this will be a fixed value (0x0000), but ideally
 				// it should be computed from the packet and the +1 to guarantee
 				// it is a bad FCS.
-
-				if (zena_packet.fcs_ok) {
-
-					packet_len_plus_2 = zena_packet.packet_len+2;
-						
+					
+					if (zena_packet.fcs_ok) {
+					packet_len_plus_2 = zena_packet.packet_len + 2;
+					
 					// write packet excluding FCS
 					fwrite (&zena_packet.packet_len, sizeof(int), 1, stdout);
 					fwrite (&packet_len_plus_2, sizeof(int), 1, stdout);	// full frame included 2 FCS octets
 					fwrite (zena_packet.packet, 1, zena_packet.packet_len, stdout);
 				} else {
-
-					// two extra bytes for deliberately wrong FCS
+					packet_len_plus_2 = zena_packet.packet_len + 2;
 					
+					// two extra bytes for deliberately wrong FCS
 					fwrite (&packet_len_plus_2, sizeof(int), 1, stdout);
 					fwrite (&packet_len_plus_2, sizeof(int), 1, stdout);
 					zena_packet.packet[zena_packet.packet_len] = 0;
