@@ -6,7 +6,7 @@
  * * Next gen hardware based on MRF24J40 chip 
  * 
  * Copyright (c) 2011,2012, Joe Desbonnet, jdesbonnet@gmail.com
- * Copyright (c) 2013, Emeric Verschuur, emericv@gmail.com
+ * Copyright (c) 2013, Emeric Verschuur, emericv@openihs.org
  * 
  * Licensed under the Apache License, Version 2.0 (the "License");
  *   you may not use this file except in compliance with the License.

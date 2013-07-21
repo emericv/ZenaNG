@@ -1,4 +1,7 @@
-ZenaNG Linux - a command line utility to interact with the Microchip
+ZenaNG Linux
+============
+
+a command line utility to interact with the Microchip
 Technologies ZENA 2.5GHz 802.15.4 packet sniffer.
 This tool support both bersion sniffer
 * Old hardware based on CC2420 chip.
@@ -14,6 +17,9 @@ http://www.willhackforsushi.com/?p=198
 Special thanks to Joe Desbonnet for the first versions of this nice tool
 Related post:
 http://jdesbonnet.blogspot.co.uk/2011/02/using-microchip-zena-zigbee802154.html
+
+Changelog
+---------
 
 Zena - Version 0.1 (16 Feb 2011)
 First release. Used libusb 0.1.
@@ -39,7 +45,7 @@ Zena - Version 0.4 (1 Mar 2011)  (CVS file version 1.61)
 * Buffer entire 802.15.4 packet and check if suitable for outputting
 to pcap file. Drop corrupted packets by default. Use -b to override.
 * Use -q to suppress warning messages.
- *
+
 Zena - Version 0.4.1 (20 Mar 2011) (CVS file version 1.63)
 * Remove call to zena_get_packet() just before the output format switch
 statement in the main loop. This was unnecessary and would have resulted
@@ -58,9 +64,14 @@ lengths which causes SEGV when accessing the zena_packet.packet[] buffer.
 ZenaNG - Version 0.5.0 (21 Jul 2013)
 Next hardware generation (based on MRF24J40 chip) support
 
-TODO: 
+To do
+-----
+
 * Option to use ZENA or host timestamp 
 
+Build & Install instructions
+----------------------------
+ 
 Requires libusb-1.0 (to run) and libusb-1.0-dev (to compile) packages. 
 
 Known issue: can cause Ubuntu 10.x running Linux 2.6.32-* to kernel crash! 
