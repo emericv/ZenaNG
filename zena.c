@@ -108,6 +108,8 @@
 #define TRUE 1
 #define FALSE 0
 
+#define min(val1, val2) (val1 < val2 ? val1 : val2)
+
 // Used by zena_get_packet() to return 802.15.4 packet data
 typedef struct  {
 	int zena_ts_sec;	// time stamp reported by ZENA (seconds)
@@ -127,10 +129,11 @@ typedef struct  {
 	(struct libusb_device_handle *dev_handle, unsigned char endpoint, 
 						unsigned char *data, int length, int *transferred, 
 						unsigned int timeout);
-	int ep_packets;
-	int ep_control;
-	int header_len;
-	int first_block_max_len;
+	int ep_packets;		// Packet endpoint
+	int ep_control;		// Control endpoint
+	int data_offset;
+	int header_len;		// Zena header length
+	int footer_len;		// Zena footer length
 } zena_dev_profile_t;
 
 const static zena_dev_profile_t dev_profile = {
@@ -138,8 +141,9 @@ const static zena_dev_profile_t dev_profile = {
 	libusb_interrupt_transfer,
 	0x81,
 	0x01,
+	1,
 	6,
-	58					// 64 - 6
+	2
 };
 
 const static zena_dev_profile_t dev_profile_ng = {
@@ -147,11 +151,12 @@ const static zena_dev_profile_t dev_profile_ng = {
 	libusb_bulk_transfer,
 	0x82,
 	0x01,
+	2,
 	7,
-	57					// 64 - 7
+	4
 };
 
-const static zena_dev_profile_t *selected_profile = &dev_profile_ng;
+static zena_dev_profile_t const *selected_profile;
 
 const static int TIMEOUT=200; // Default USB timeout in ms
 const static int PACKET_FRAG_TIMEOUT = 100; // USB timeout when retrieving 2nd or 3rd part of packet
@@ -218,8 +223,13 @@ libusb_device_handle *setup_libusb_access() {
 	libusb_set_debug (NULL, (debug_level == 0 ? 0 : 3) );
 
 	debug (1, "calling libusb_open_device_with_vid_pid() to open USB device handle to ZENA");
+	selected_profile = &dev_profile; // Previous hardware
 	zena = libusb_open_device_with_vid_pid (NULL, USB_VENDOR_ID, selected_profile->product_id);
-	if (zena == NULL) {
+	if (zena == NULL) { // Previous hardware not found
+		selected_profile = &dev_profile_ng; // Next gen hardware
+		zena = libusb_open_device_with_vid_pid (NULL, USB_VENDOR_ID, selected_profile->product_id);
+	}
+	if (zena == NULL) { // Next gen hardware not found
 		fprintf (stderr,"ERROR: Could not open ZENA device. Not found or not accessible.\n");
 		return NULL;
 	}
@@ -360,14 +370,15 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 
 	// get host time of packet reception
 	clock_gettime(CLOCK_REALTIME, &tp);
-	
 
 	// Get packet timestamp from ZENA header + capture start time
 	zena_packet->host_ts_sec = tp.tv_sec;
 	zena_packet->host_ts_usec = tp.tv_nsec / 1000;
 
-	zena_packet->zena_ts_sec = (int)usbbuf[3]  | ( ((int)usbbuf[4])<<8 );
-	zena_packet->zena_ts_usec = ( ((int)usbbuf[1])  | ( ((int)usbbuf[2])<<8 )) * 15; //approx
+	zena_packet->zena_ts_sec = (int)usbbuf[selected_profile->data_offset + 2]
+			| ( ((int)usbbuf[selected_profile->data_offset + 3])<<8 );
+	zena_packet->zena_ts_usec = ( ((int)usbbuf[selected_profile->data_offset])
+			| ( ((int)usbbuf[selected_profile->data_offset + 1])<<8 )) * 15; //approx
 	
 	data_len = usbbuf[selected_profile->header_len - 1];
 
@@ -376,18 +387,16 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 		warning("Packet too long, length=%d. Ignoring.\n",data_len);
 		return -3;
 	}
-
-	// Write packet data. This is a little messy because of long packets that don't fit in one
-	// chunk of 64 byte USB data.
-	if (data_len <= selected_profile->first_block_max_len) {
-		// short packet -- easy!
-		memcpy (zena_packet->packet, usbbuf + selected_profile->header_len, data_len);
-
-	} else {
-
-		memcpy (zena_packet->packet, usbbuf + selected_profile->header_len, selected_profile->first_block_max_len);
-
-		debug (1, "calling libusb_transfer() for second part of packet");
+	
+	int bytesRemaining = data_len;
+	int fragMaxLen = 64 - selected_profile->header_len;
+	int nb_read = min(bytesRemaining, fragMaxLen);
+	memcpy (zena_packet->packet, usbbuf + selected_profile->header_len, nb_read);
+	bytesRemaining -= nb_read;
+	int write_offset = nb_read;
+	fragMaxLen = 64 - selected_profile->data_offset;
+	
+	while (bytesRemaining > 0) {
 		status = selected_profile->transfer(zena, selected_profile->ep_packets, usbbuf, 64, &nbytes, PACKET_FRAG_TIMEOUT);
 
 		// A status < 0 here will be problematic. Likely that the data will be corrupted. But
@@ -397,33 +406,17 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 			warning ("libusb_transfer() returned status=%d during second chunk of long packet\n", status);
 			return status;
 		}
-
-		int bytesRemaining = data_len - selected_profile->first_block_max_len;
-		if ( bytesRemaining <= 63 ) {
-			memcpy (zena_packet->packet + selected_profile->first_block_max_len, usbbuf + 1, bytesRemaining);
-		} else {
-			// long packet -- will need third libusb_transfer()
-			memcpy (zena_packet->packet + selected_profile->first_block_max_len, usbbuf + 1, 63);
-			bytesRemaining -= 63;
-						
-			debug (1, "calling libusb_transfer() for third part of packet");
- 			status = selected_profile->transfer(zena, selected_profile->ep_packets, usbbuf, 64, &nbytes, PACKET_FRAG_TIMEOUT);
-			// A status < 0 here will be problematic. Likely that the data will be corrupted. But
-			// as the packet header is already written, might as well write what's in the buffer 
-			// and display a warning message.
-			if (status < 0) {
-				warning("libusb_transfer() returned status=%d during third chunk of long packet\n", status);
-				return status;
-			}
-
-			memcpy (zena_packet->packet + selected_profile->first_block_max_len + 63, usbbuf + 1, bytesRemaining);
-		}
+		
+		nb_read = min(bytesRemaining, fragMaxLen);
+		memcpy (zena_packet->packet + write_offset, usbbuf + selected_profile->data_offset, nb_read);
+		bytesRemaining -= nb_read;
+		write_offset += nb_read;
 	}
 
 	zena_packet->rssi = zena_packet->packet[data_len-2];
 	zena_packet->lqi = zena_packet->packet[data_len-1]&0x7f;
 	zena_packet->fcs_ok = zena_packet->packet[data_len-1]&80 ? TRUE : FALSE;
-	zena_packet->packet_len = data_len - 2;
+	zena_packet->packet_len = data_len - selected_profile->footer_len;
 
 	return 0;
 }
