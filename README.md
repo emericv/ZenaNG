@@ -97,6 +97,8 @@ Use it with wireshark
 
     $ wireshark -k -i <( path/to/zenang -c channel_number )
 
+This tool can be lanched with the -x option if you has the option "TI CC24XX FCS format" activated in wireshark (Edit->Preferences->Protocol->IEEE 802.15.4). This option  should not be used with MRF24J40 chip based hardware.
+
 Known issue
 -----------
 

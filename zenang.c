@@ -129,6 +129,9 @@ int kernel_driver_detach = FALSE;
 // Use -q flag to enable quiet mode. Warning messages will be suppressed.
 int quiet_mode = FALSE;
 
+// Use -x flag to write LQI and RSSI field.
+int pcap_lqi_rssi_write = FALSE;
+
 // Set to true in signal_handler to signal exit from main loop
 int exit_flag = FALSE;
 
@@ -381,6 +384,7 @@ void usage () {
 	fprintf (stderr,"  -f format \t Select packet capture format. Allowed: pcap (default) or usbhex.\n");
 	fprintf (stderr,"  -d level \t Set debug level, 0 = min [default], 9 = max verbosity\n");
 	fprintf (stderr,"  -s interval \t Scan through 802.15.4 channels with timeslice interval in milliseconds\n");
+	fprintf (stderr,"  -x \t Write the both LQI and RSSI bytes (applicable to the PCAP format)\n");
 	fprintf (stderr,"  -b \t Include corrupted packets. Applies to pcap output only.\n");
 	fprintf (stderr,"  -q \t Quiet mode: suppress warning messages.\n");
 	fprintf (stderr,"  -v \t Print version to stderr and exit\n");
@@ -470,7 +474,7 @@ int main( int argc, char **argv) {
 
 
 	// Parse command line arguments. See usage() for details.
-	while ((c = getopt(argc, argv, "bc:d:f:hqs:t:v")) != -1) {
+	while ((c = getopt(argc, argv, "bc:d:f:hqs:t:vx")) != -1) {
 		switch(c) {
 			case 'b':
 				drop_bad_packets = FALSE;
@@ -512,6 +516,9 @@ int main( int argc, char **argv) {
 			case 'v':
 				version();
 				exit(EXIT_SUCCESS);
+			case 'x':
+				pcap_lqi_rssi_write = TRUE;
+				break;
 			case '?':	// case when a command line switch argument is missing
 				if (optopt == 'c') {
 					fprintf (stderr,"ERROR: 802.15.4 channel 11 to 26 must be specified with -c\n");
@@ -695,10 +702,13 @@ int main( int argc, char **argv) {
 				if (selected_profile->flags & HAS_FCS_FIELD) {
 					fwrite (&zena_packet.packet_len, sizeof(int), 1, stdout);
 					fwrite (&zena_packet.packet_len, sizeof(int), 1, stdout);
-					zena_packet.packet[zena_packet.packet_len] = 0;
-					zena_packet.packet[zena_packet.packet_len+1] = 0;
 					fwrite (zena_packet.packet, 1, zena_packet.packet_len, stdout);
-				} else 
+				} else if (pcap_lqi_rssi_write) {
+					packet_len_plus_2 = zena_packet.packet_len + 2;
+					fwrite (&packet_len_plus_2, sizeof(int), 1, stdout);
+					fwrite (&packet_len_plus_2, sizeof(int), 1, stdout);
+					fwrite (zena_packet.packet, 1, zena_packet.packet_len, stdout);
+				} else
 					
 				// Small problem re FCS. Old HW ZENA does not provide this information.
 				// Solution is in the case of a good packet not to include FCS
