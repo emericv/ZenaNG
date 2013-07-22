@@ -18,6 +18,19 @@ Special thanks to Joe Desbonnet for the first versions of this nice tool
 Related post:
 http://jdesbonnet.blogspot.co.uk/2011/02/using-microchip-zena-zigbee802154.html
 
+
+
+MRF24J40 Protocol (Next gen HW)
+-------------------------------
+The following schema describe the USB packet format:
+![USB packet format](https://raw.github.com/Mr-TI/ZenaNG/master/rs/usb_zenagn_mrf24j40.png)
+
+This is an exemple of capture using Zena Studio on Windows
+![Zena Studio capture](https://raw.github.com/Mr-TI/ZenaNG/master/rs/usb_zenang_mrf24j40_tracedump.png)
+
+...and the corresponding traces using an USB sniffer:
+![USB packets capture](https://raw.github.com/Mr-TI/ZenaNG/master/rs/usb_zenang_mrf24j40_hexdump.png)
+
 Changelog
 ---------
 
