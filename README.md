@@ -95,7 +95,7 @@ To build it, just call:
 Use it with wireshark
 ---------------------
 
-    $ wireshark -k -i <( build/zenang -c 19 )
+    $ wireshark -k -i <( path/to/zenang -c channel_number )
 
 Known issue
 -----------
