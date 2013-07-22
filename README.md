@@ -18,7 +18,10 @@ Special thanks to Joe Desbonnet for the first versions of this nice tool
 Related post:
 http://jdesbonnet.blogspot.co.uk/2011/02/using-microchip-zena-zigbee802154.html
 
+CC2420 Protocol (Old gen HW)
+----------------------------
 
+please visit http://jdesbonnet.blogspot.co.uk/2011/02/using-microchip-zena-zigbee802154.html
 
 MRF24J40 Protocol (Next gen HW)
 -------------------------------
