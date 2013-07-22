@@ -3,9 +3,9 @@ ZenaNG Linux
 
 a command line utility to interact with the Microchip
 Technologies ZENA 2.5GHz 802.15.4 packet sniffer.
-This tool support both bersion sniffer
-* Old hardware based on CC2420 chip.
-* Next gen hardware based on MRF24J40 chip 
+This tool support both sniffer versions
+* Previous hardware based on CC2420 chip.
+* Next gen hardware based on MRF24J40 chip
 
 This project is based on Zena Linux project hosted at
 http://code.google.com/p/microchip-zena/
@@ -15,10 +15,8 @@ engineering work on the Microchip ZENA. See this post for details:
 http://www.willhackforsushi.com/?p=198
 
 Special thanks to Joe Desbonnet for the first versions of this nice tool
-Related post:
-http://jdesbonnet.blogspot.co.uk/2011/02/using-microchip-zena-zigbee802154.html
 
-CC2420 Protocol (Old gen HW)
+CC2420 Protocol (Prev gen HW)
 ----------------------------
 
 please visit http://jdesbonnet.blogspot.co.uk/2011/02/using-microchip-zena-zigbee802154.html
