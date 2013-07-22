@@ -10,11 +10,11 @@ This tool support both sniffer versions
 This project is based on Zena Linux project hosted at
 http://code.google.com/p/microchip-zena/
 
-Special thanks to Joshua Wright who did much of the initial reverse 
+Special thanks to:
+* Joshua Wright who did much of the initial reverse 
 engineering work on the Microchip ZENA. See this post for details:
 http://www.willhackforsushi.com/?p=198
-
-Special thanks to Joe Desbonnet for the first versions of this nice tool
+* Joe Desbonnet for the first versions of this nice tool
 
 CC2420 Protocol (Prev gen HW)
 ----------------------------
@@ -86,8 +86,25 @@ To do
 Build & Install instructions
 ----------------------------
  
-Requires libusb-1.0 (to run) and libusb-1.0-dev (to compile) packages. 
+Requires libusb-1.0 (to run) and libusb-1.0-dev (to compile) packages.
 
-Known issue: can cause Ubuntu 10.x running Linux 2.6.32-* to kernel crash! 
+To build it, just call:
+
+    $ make
+
+Use it with wireshark
+---------------------
+
+    $ wireshark -k -i <( build/zenang -c 19 )
+
+Known issue
+-----------
+
+First, to run this tool as an user you could have need to create the file /etc/udev/rules.d/99-zena-dongle.rules with the following content:
+
+    ATTRS{idVendor}=="04d8" , ATTRS{idProduct}=="000e", MODE="0666"
+    ATTRS{idVendor}=="04d8" , ATTRS{idProduct}=="0e00", MODE="0666"
+
+In addition, this tool can cause Ubuntu 10.x running Linux 2.6.32-* to kernel crash! 
 Cause unknown. A fresh Ubuntu 10.10 installed from CD running 2.6.35-22 
 does not seem to have this problem. Suggest running in a virtual machine.
