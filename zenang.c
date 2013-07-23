@@ -401,6 +401,9 @@ void usage () {
 
 void version () {
 	fprintf (stderr,"%s, version %s\n", APP_NAME, VERSION);
+	fprintf (stderr,"\n");
+	fprintf (stderr,"Copyright (c) 2011,2012 - Joe Desbonnet    <jdesbonnet@gmail.com>\n");
+	fprintf (stderr,"Copyright (c) 2013      - Emeric Verschuur <emericv@openihs.org>\n");
 }
 
 /**
