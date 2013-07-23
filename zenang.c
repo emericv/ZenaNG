@@ -327,7 +327,7 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 	data_len = usbbuf[selected_profile->header_len - 1];
 
 	// Check for invalid packet lengths
-	if (data_len > 129) {
+	if (data_len > (127 + selected_profile->footer_len)) {
 		warning("Packet too long, length=%d. Ignoring.\n",data_len);
 		return -3;
 	}
@@ -379,7 +379,7 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
  */
 void usage () {
 	fprintf (stderr,"\n");
-	fprintf (stderr,"Usage: zena -c channel [-f format] [-b] [-q] [-v] [-h] [-d level]\n");
+	fprintf (stderr,"Usage: zena -c channel [-f format] [-b] [-q] [-v] [-x] [-h] [-d level]\n");
 	fprintf (stderr,"  -c channel \t Select 802.15.4 channel. Allowed: 11 .. 26\n");
 	fprintf (stderr,"  -f format \t Select packet capture format. Allowed: pcap (default) or usbhex.\n");
 	fprintf (stderr,"  -d level \t Set debug level, 0 = min [default], 9 = max verbosity\n");
@@ -392,10 +392,10 @@ void usage () {
 
 	fprintf (stderr,"\n");
 	fprintf (stderr,"Packet capture output is sent to standard output. Use the following command to\n");
-	fprintf (stderr,"display real time packet feed in wireshark:\n  wireshark -k -i <( zena -c 20 )\n");
+	fprintf (stderr,"display real time packet feed in wireshark:\n  wireshark -k -i <( zenang -c 20 )\n");
 
 	fprintf (stderr,"\n");
-	fprintf (stderr,"Project code and documentation is hosted at:\n  http://code.google.com/p/microchip-zena/\n");
+	fprintf (stderr,"Project code and documentation is hosted at:\n  https://github.com/Mr-TI/ZenaNG/\n");
 	fprintf (stderr,"\n");
 }
 
