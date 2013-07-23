@@ -76,7 +76,8 @@ Check zena_packet.packet_len is a sane value. Occasionally getting crazy
 lengths which causes SEGV when accessing the zena_packet.packet[] buffer.
 
 ZenaNG - Version 0.5.0 (21 Jul 2013)
-Next hardware generation (based on MRF24J40 chip) support
+* Next hardware generation (based on MRF24J40 chip) support
+* Option "TI CC24XX FCS format" support for wireshark (Edit->Preferences->Protocol->IEEE 802.15.4)
 
 To do
 -----
