@@ -30,9 +30,8 @@
 #include <stdarg.h>
 #include <libusb-1.0/libusb.h>
 
-#define APP_NAME "zena"
+#define APP_NAME "zenang"
 #define VERSION "0.5.0, 22 Jul 2013"
-#define USB_VENDOR_ID 0x04d8   // Microchip Technologies Inc
 #define INTERFACE 0
 
 #define FORMAT_PCAP 1
@@ -41,10 +40,15 @@
 #define TRUE 1
 #define FALSE 0
 
-#define ZENA_HW_PID 0x000e
-#define ZENA_NG_HW_PID 0x0e00
+#define TI_HW_VID 0x0451
+#define TI_CC2531_NANO_HW_PID 0x16a8
+#define TI_CC2531_HW_PID 0x16ae
+#define ZENA_HW_VID 0x04d8
+#define ZENA_CC2420_HW_PID 0x000e
+#define ZENA_MRF24J40_HW_PID 0x0e00
 
 #define HAS_FCS_FIELD 0x00000001
+#define CHANNEL_SELECTABLE 0x00000002
 
 #define min(val1, val2) (val1 < val2 ? val1 : val2)
 
@@ -62,6 +66,7 @@ typedef struct  {
 } zena_packet_t;
 
 typedef struct  {
+	int vendor_id;
 	int product_id;
 	int flags;
 	int (*transfer) 
@@ -75,9 +80,10 @@ typedef struct  {
 	int footer_len;		// Zena footer length
 } zena_dev_profile_t;
 
-const static zena_dev_profile_t dev_profile = {
-	ZENA_HW_PID,
-	0,
+const static zena_dev_profile_t zena_cc2420 = {
+	ZENA_HW_VID,
+	ZENA_CC2420_HW_PID,
+	CHANNEL_SELECTABLE,
 	libusb_interrupt_transfer,
 	0x81,
 	0x01,
@@ -86,12 +92,25 @@ const static zena_dev_profile_t dev_profile = {
 	2
 };
 
-const static zena_dev_profile_t dev_profile_ng = {
-	ZENA_NG_HW_PID,
-	HAS_FCS_FIELD,
+const static zena_dev_profile_t zena_mrf24j40 = {
+	ZENA_HW_VID,
+	ZENA_MRF24J40_HW_PID,
+	HAS_FCS_FIELD | CHANNEL_SELECTABLE,
 	libusb_bulk_transfer,
 	0x82,
 	0x01,
+	2,
+	7,
+	4
+};
+
+const static zena_dev_profile_t ti_cc2531 = {
+	TI_HW_VID,
+	TI_CC2531_HW_PID,
+	0,
+	libusb_bulk_transfer,
+	0x83,
+	0x83,
 	2,
 	7,
 	4
@@ -167,11 +186,15 @@ libusb_device_handle *setup_libusb_access() {
 	libusb_set_debug (NULL, (debug_level == 0 ? 0 : 3) );
 
 	debug (1, "calling libusb_open_device_with_vid_pid() to open USB device handle to ZENA");
-	selected_profile = &dev_profile; // Previous hardware
-	zena = libusb_open_device_with_vid_pid (NULL, USB_VENDOR_ID, selected_profile->product_id);
+	selected_profile = &zena_cc2420; // Previous hardware
+	zena = libusb_open_device_with_vid_pid (NULL, selected_profile->vendor_id, selected_profile->product_id);
 	if (zena == NULL) { // Previous hardware not found
-		selected_profile = &dev_profile_ng; // Next gen hardware
-		zena = libusb_open_device_with_vid_pid (NULL, USB_VENDOR_ID, selected_profile->product_id);
+		selected_profile = &zena_mrf24j40; // Next gen hardware
+		zena = libusb_open_device_with_vid_pid (NULL, selected_profile->vendor_id, selected_profile->product_id);
+	}
+	if (zena == NULL) { // Previous hardware not found
+		selected_profile = &ti_cc2531; // Next gen hardware
+		zena = libusb_open_device_with_vid_pid (NULL, selected_profile->vendor_id, selected_profile->product_id);
 	}
 	if (zena == NULL) { // Next gen hardware not found
 		fprintf (stderr,"ERROR: Could not open ZENA device. Not found or not accessible.\n");
@@ -359,7 +382,7 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 		}
 	}
 
-	if (selected_profile->product_id == ZENA_HW_PID) { // hold HW
+	if (selected_profile->product_id == ZENA_CC2420_HW_PID) { // hold HW
 		zena_packet->rssi = zena_packet->packet[data_len-2];
 		zena_packet->lqi = zena_packet->packet[data_len-1]&0x7f;
 		zena_packet->fcs_ok = zena_packet->packet[data_len-1]&80 ? TRUE : FALSE;
@@ -463,6 +486,7 @@ int main( int argc, char **argv) {
 	int scan_mode = FALSE;
 	int drop_bad_packets = TRUE;
 	int exit_time = -1;
+	int status;
 
 	int c;
 
@@ -539,11 +563,6 @@ int main( int argc, char **argv) {
 		}
 	}
 
-	if (channel == -1) {
-		fprintf (stderr,"ERROR: 802.15.4 channel is mandatory. Specify with -c. Use -h for help.\n");
-		exit(EXIT_FAILURE);
-	}
-
 	if (debug_level > 0) {
 		fprintf (stderr,"DEBUG: debug level %d\n",debug_level);
 	}
@@ -554,12 +573,19 @@ int main( int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	// Set 802.15.4 channel
-	int status = zena_set_channel (zena,channel);
-	if (status < 0) {
-		fprintf (stderr, "ERROR: error setting ZENA to 802.15.4 channel %d, errorCode=%d\n",channel,status);
+	if (channel == -1 && (selected_profile->flags & CHANNEL_SELECTABLE)) {
+		fprintf (stderr,"ERROR: 802.15.4 channel is mandatory. Specify with -c. Use -h for help.\n");
 		exit(EXIT_FAILURE);
-	} 
+	}
+
+	if (channel != -1) {
+		// Set 802.15.4 channel
+		status = zena_set_channel (zena,channel);
+		if (status < 0) {
+			fprintf (stderr, "ERROR: error setting ZENA to 802.15.4 channel %d, errorCode=%d\n",channel,status);
+			exit(EXIT_FAILURE);
+		}
+	}
 
 	// Write PCAP header
 	if (format == FORMAT_PCAP) {
@@ -636,7 +662,9 @@ int main( int argc, char **argv) {
 		switch (format) {
 
 			case FORMAT_USBHEX:
-
+				
+				bzero(usbbuf, 64);
+				
 				status = selected_profile->transfer(zena, selected_profile->ep_packets, usbbuf, 64, &nbytes, usb_timeout);
 				// check for timeout and silently ignore
 				if (status == LIBUSB_ERROR_TIMEOUT) {
