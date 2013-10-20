@@ -100,7 +100,7 @@ const static zena_dev_profile_t zena_mrf24j40 = {
 	0x82,
 	0x01,
 	2,
-	7,
+	6,
 	4
 };
 
