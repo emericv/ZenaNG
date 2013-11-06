@@ -103,6 +103,8 @@ This tool can be lanched with the -x option if you has the option "TI CC24XX FCS
 Known issue
 -----------
 
+The MRF24J40 may need a firmware update to work with this tool. To upgrade it you have to use the Zena Wireless Development Studio available here : http://www.microchip.com/pagehandler/en-us/technology/personalareanetworks/technology/home.html
+
 First, to run this tool as an user you could have need to create the file /etc/udev/rules.d/99-zena-dongle.rules with the following content:
 
     ATTRS{idVendor}=="04d8" , ATTRS{idProduct}=="000e", MODE="0666"
