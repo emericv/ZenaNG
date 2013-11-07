@@ -97,6 +97,11 @@ Use it with wireshark
 ---------------------
 
     $ wireshark -k -i <( path/to/zenang -c channel_number )
+    or
+    $ mkfifo /tmp/zenafifo
+    $ path/to/zenang -c 12 > /tmp/zenafifo
+
+If you use the fifo method, you then use the the regular fifo interface tools in wireshark. This lets you restart captures in wireshark without exiting and relaunching zenang and the subshells.
 
 This tool can be lanched with the -x option if you has the option "TI CC24XX FCS format" activated in wireshark (Edit->Preferences->Protocol->IEEE 802.15.4). This option  should not be used with MRF24J40 chip based hardware.
 
