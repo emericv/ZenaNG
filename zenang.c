@@ -713,8 +713,9 @@ int main( int argc, char **argv) {
 
 				// Ensure that zena_packet.packet_len is a sane value. Occasionally getting crazy
 				// values which causes segv when accessing the zena_packet.packet[] buffer.
+				//Lu: added case of 0 byte length here which causes tshark to crash
 				zena_packet.packet_len &= 0xff;
-				if (zena_packet.packet_len > 125) {
+				if (zena_packet.packet_len > 125 || zena_packet.packet_len == 0) {
 					fprintf (stderr,"ERROR: invalid packet length, len=%d\n",zena_packet.packet_len);
 					break;
 				}
