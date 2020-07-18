@@ -1,13 +1,14 @@
 /**
  * ZenaNG Linux - a command line utility to interact with the Microchip
  * Technologies ZENA 2.5GHz 802.15.4 packet sniffer.
- * This tool support both bersion sniffer
+ * This tool support both version sniffer
  * * Old hardware based on CC2420 chip.
- * * Next gen hardware based on MRF24J40 chip 
- * 
+ * * Next gen hardware based on MRF24J40 chip
+ *
  * Copyright (c) 2011,2012, Joe Desbonnet, jdesbonnet@gmail.com
  * Copyright (c) 2013, Emeric Verschuur, emericv@openihs.org
- * 
+ * Copyright (c) 2020, Ynamics, https://www.ynamics.com
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  *   you may not use this file except in compliance with the License.
  *   You may obtain a copy of the License at
@@ -31,7 +32,7 @@
 #include <libusb-1.0/libusb.h>
 
 #define APP_NAME "zenang"
-#define VERSION "0.5.0, 22 Jul 2013"
+#define VERSION "0.5.0, 18 Jul 2020"
 #define INTERFACE 0
 
 #define FORMAT_PCAP 1
@@ -40,9 +41,14 @@
 #define TRUE 1
 #define FALSE 0
 
+// Buffer size for Incoming USB packages.  Must be >= 64.
+// 64 byte size was insufficient on lightweight Linux system -> upgraded to 256.
+#define ZENA_USB_BUFFER_SIZE 256
+
 #define TI_HW_VID 0x0451
 #define TI_CC2531_NANO_HW_PID 0x16a8
 #define TI_CC2531_HW_PID 0x16ae
+
 #define ZENA_HW_VID 0x04d8
 #define ZENA_CC2420_HW_PID 0x000e
 #define ZENA_MRF24J40_HW_PID 0x0e00
@@ -69,10 +75,13 @@ typedef struct  {
 	int vendor_id;
 	int product_id;
 	int flags;
-	int (*transfer) 
-	(struct libusb_device_handle *dev_handle, unsigned char endpoint, 
-						unsigned char *data, int length, int *transferred, 
-						unsigned int timeout);
+	int (*transfer)
+		( struct libusb_device_handle *dev_handle,
+		  unsigned char endpoint,
+		  unsigned char *data,
+		  int  length,
+		  int *transferred,
+		  unsigned int timeout );
 	int ep_packets;		// Packet endpoint
 	int ep_control;		// Control endpoint
 	int data_offset;
@@ -122,13 +131,13 @@ const static int TIMEOUT=200; // Default USB timeout in ms
 const static int PACKET_FRAG_TIMEOUT = 100; // USB timeout when retrieving 2nd or 3rd part of packet
 
 // PCAP constants
-const static int PCAP_MAGIC = 0xa1b2c3d4;
-const static short PCAP_VERSION_MAJOR = 2;
-const static short PCAP_VERSION_MINOR = 4;
-const static int PCAP_TZ = 0;				// thiszone: GMT to local correction
-const static int PCAP_SIGFIGS = 0;			// sigfigs: accuracy of timestamps
-const static int PCAP_SNAPLEN = 128;		// snaplen: max len of packets, in octets
-const static int PCAP_LINKTYPE = 0xc3;		// data link type DLT_IEEE802_15_4 (see <pcap/bpf.h>)
+const static int	PCAP_MAGIC = 0xa1b2c3d4;
+const static short	PCAP_VERSION_MAJOR = 2;
+const static short	PCAP_VERSION_MINOR = 4;
+const static int	PCAP_TZ = 0;			// thiszone: GMT to local correction
+const static int	PCAP_SIGFIGS = 0;		// sigfigs: accuracy of timestamps
+const static int	PCAP_SNAPLEN = 128;		// snaplen: max len of packets, in octets
+const static int	PCAP_LINKTYPE = 0xc3;		// data link type DLT_IEEE802_15_4 (see <pcap/bpf.h>)
 
 
 // Define error codes used internally
@@ -141,7 +150,7 @@ int debug_level = 0;
 // packet scan to be the timeslice interval.
 int usb_timeout = 200;
 
-// Flag set to true if a kernel driver detach was performed. 
+// Flag set to true if a kernel driver detach was performed.
 // Allows for reattach in exit handler.
 int kernel_driver_detach = FALSE;
 
@@ -155,6 +164,7 @@ int pcap_lqi_rssi_write = FALSE;
 int exit_flag = FALSE;
 
 libusb_device *find_zena();
+
 void debug (int level, const char *msg, ...);
 void warning (const char *msg, ...);
 
@@ -172,10 +182,10 @@ libusb_device_handle *setup_libusb_access() {
 	// libusb API 1.0 documentation here:
 	// http://libusb.sourceforge.net/doc/function.usbsetconfiguration.html
 
-	// Initialize libusb library. libusb_init() must be called before any 
+	// Initialize libusb library. libusb_init() must be called before any
 	// other libusb_* function. If parameter is NULL use default libusb_context.
 	// http://libusb.sourceforge.net/api-1.0/group__lib.html
-	debug (1, "calling libusb_init() to initialize libusb");	
+	debug (1, "calling libusb_init() to initialize libusb");
 	status = libusb_init (NULL);
 	if ( status < 0 ) {
 		fprintf (stderr,"ERROR: Could not initialize libusb\n");
@@ -185,14 +195,17 @@ libusb_device_handle *setup_libusb_access() {
 	// Set debugging level 0 .. 3. NULL param means use default usb context
 	libusb_set_debug (NULL, (debug_level == 0 ? 0 : 3) );
 
-	debug (1, "calling libusb_open_device_with_vid_pid() to open USB device handle to ZENA");
+	debug (1, "calling libusb_open_device_with_vid_pid() to open CC2420 USB device handle to ZENA");
 	selected_profile = &zena_cc2420; // Previous hardware
 	zena = libusb_open_device_with_vid_pid (NULL, selected_profile->vendor_id, selected_profile->product_id);
+
 	if (zena == NULL) { // Previous hardware not found
+		debug (1, "calling libusb_open_device_with_vid_pid() to open MRF24j40 USB device handle to ZENA");
 		selected_profile = &zena_mrf24j40; // Next gen hardware
 		zena = libusb_open_device_with_vid_pid (NULL, selected_profile->vendor_id, selected_profile->product_id);
 	}
 	if (zena == NULL) { // Previous hardware not found
+		debug (1, "calling libusb_open_device_with_vid_pid() to open CC2531 USB device handle to ZENA");
 		selected_profile = &ti_cc2531; // Next gen hardware
 		zena = libusb_open_device_with_vid_pid (NULL, selected_profile->vendor_id, selected_profile->product_id);
 	}
@@ -213,7 +226,7 @@ libusb_device_handle *setup_libusb_access() {
 		kernel_driver_detach = TRUE;
 		debug (9,"kernel driver detach successful.\n");
 	}
-	
+
 	// From "lsusb -v" bConfigurationValue is 1.
 	// TODO: what does this mean?
 	debug (9, "calling usb_set_configuration()");
@@ -222,7 +235,7 @@ libusb_device_handle *setup_libusb_access() {
 		fprintf(stderr,"ERROR: Could not set configuration 1: errorCode=%d\n", status);
 		return NULL;
 	}
- 
+
 	// Claim interface. This is problematic. When ZENA is first plugged in
 	// something in the OS automatically 'binds' it causing this to fail.
 	// Can we programatically 'unbind' it? Maybe with usb_release_interface()?
@@ -232,16 +245,16 @@ libusb_device_handle *setup_libusb_access() {
 		fprintf(stderr,"ERROR: Could not claim interface %d: errorCode=%d. Is device already bound?\n",INTERFACE,status);
 		return NULL;
 	}
- 
+
 	// Success, return usb_dev_handle
 	debug (1,"ZENA successfully located and claimed");
 	return zena;
 }
- 
+
 
 /**
- * Select 802.15.4 channel on ZENA. 
- * 
+ * Select 802.15.4 channel on ZENA.
+ *
  * Empty packet buffers before changing channel (otherwise
  * it won't be clear from which channel a packet arrived).
  *
@@ -260,14 +273,14 @@ int zena_set_channel (libusb_device_handle *zena, int channel) {
 		return ERR_INVALID_CHANNEL;
 	}
 
-	// Require a 64 byte buffer to send USB packet to ZENA
-	unsigned char usbbuf[64];
+	// Byte buffer to send USB packet to ZENA
+	unsigned char usbbuf[ZENA_USB_BUFFER_SIZE];
 
 	// Number of bytes actually transferred stored here. Not used.
 	int status,nbytes;
 
 	// set buffer to all zero
-	bzero (usbbuf,64);		
+	bzero (usbbuf,ZENA_USB_BUFFER_SIZE);
 
 	// Channel is byte offset 1 in packet
 	usbbuf[1] = channel;
@@ -275,7 +288,7 @@ int zena_set_channel (libusb_device_handle *zena, int channel) {
 	// Send to device selected_profile->ep_control end point.
 	// http://libusb.sourceforge.net/api-1.0/group__syncio.html
 	debug (1, "calling libusb_transfer() to selected_profile->ep_control");
-	status = selected_profile->transfer (zena, selected_profile->ep_control, usbbuf, 64, &nbytes, TIMEOUT);
+	status = selected_profile->transfer (zena, selected_profile->ep_control, usbbuf, ZENA_USB_BUFFER_SIZE, &nbytes, TIMEOUT);
 	if ( status < 0 ) {
 		fprintf (stderr,"ERROR: zena_set_channel(): error on libusb_transfer(). errorCode=%d\n", status);
 		return status;
@@ -288,7 +301,7 @@ int zena_set_channel (libusb_device_handle *zena, int channel) {
 	// to be outputted it will be tagged with the incorrect 802.15.4 channel.
 	// Better to loose this data than have inaccurate data.
 	do {
-		status = selected_profile->transfer (zena, selected_profile->ep_packets, usbbuf, 64, &nbytes, PACKET_FRAG_TIMEOUT);
+		status = selected_profile->transfer (zena, selected_profile->ep_packets, usbbuf, ZENA_USB_BUFFER_SIZE, &nbytes, PACKET_FRAG_TIMEOUT);
 		if (nbytes>0) {
 			debug (9,"found %d bytes in buffer after channel change\n", nbytes);
 		}
@@ -300,13 +313,13 @@ int zena_set_channel (libusb_device_handle *zena, int channel) {
 
 
 /**
- * Retrieve one 802.15.4 packet from ZENA. This may require multiple 64 byte
+ * Retrieve one 802.15.4 packet from ZENA. This may require multiple
  * USB read requests.
  *
  * @param zena libusb_device_handle for ZENA USB device which must be open and ready
  * @param zena_packet A memory structure which will be populated with 802.15.4 packet
  * data and metadata read from the ZENA
- * 
+ *
  * @return 0 on success. Negative error code on failure. If an error code is returned
  * the contents of zena_packet is undefined.
  * TODO: mixing up libusb return codes with my own return codes.
@@ -315,13 +328,13 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 
 	int status,nbytes,data_len,packet_len;
 	struct timespec tp;
-	uint8_t usbbuf[64];
+	uint8_t usbbuf[ZENA_USB_BUFFER_SIZE];
 
 	// http://libusb.sourceforge.net/doc/function.usbinterruptread.html
 	// Documentation says status should contain the number of bytes read.
 	// This is not what I'm finding. Getting 0 on success.
 	//debug (1, "calling usb_interrupt_read()");
-	status = selected_profile->transfer(zena, selected_profile->ep_packets, usbbuf, 64, &nbytes, usb_timeout);
+	status = selected_profile->transfer(zena, selected_profile->ep_packets, usbbuf, ZENA_USB_BUFFER_SIZE, &nbytes, usb_timeout);
 	// check for timeout and silently ignore
 	if (status == LIBUSB_ERROR_TIMEOUT) {
 		debug(9,"zena_get_packet(): libusb_transfer() timeout");
@@ -346,7 +359,7 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 			| ( ((int)usbbuf[selected_profile->data_offset + 3])<<8 );
 	zena_packet->zena_ts_usec = ( ((int)usbbuf[selected_profile->data_offset])
 			| ( ((int)usbbuf[selected_profile->data_offset + 1])<<8 )) * 15; //approx
-	
+
 	data_len = usbbuf[selected_profile->header_len - 1];
 
 	// Check for invalid packet lengths
@@ -354,27 +367,27 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 		warning("Packet too long, length=%d. Ignoring.\n",data_len);
 		return -3;
 	}
-	
+
 	int bytesRemaining = data_len;
-	int fragMaxLen = 64 - selected_profile->header_len;
+	int fragMaxLen = ZENA_USB_BUFFER_SIZE - selected_profile->header_len;
 	int nb_read = min(bytesRemaining, fragMaxLen);
 	memcpy (zena_packet->packet, usbbuf + selected_profile->header_len, nb_read);
 	bytesRemaining -= nb_read;
-	
+
 	if (bytesRemaining > 0) {
 		int write_offset = nb_read;
-		fragMaxLen = 64 - selected_profile->data_offset;
+		fragMaxLen = ZENA_USB_BUFFER_SIZE - selected_profile->data_offset;
 		while (bytesRemaining > 0) {
-			status = selected_profile->transfer(zena, selected_profile->ep_packets, usbbuf, 64, &nbytes, PACKET_FRAG_TIMEOUT);
+			status = selected_profile->transfer(zena, selected_profile->ep_packets, usbbuf, ZENA_USB_BUFFER_SIZE, &nbytes, PACKET_FRAG_TIMEOUT);
 
 			// A status < 0 here will be problematic. Likely that the data will be corrupted. But
-			// as the packet header is already written, might as well write what's in the buffer 
+			// as the packet header is already written, might as well write what's in the buffer
 			// and display a warning message.
 			if (status < 0) {
 				warning ("libusb_transfer() returned status=%d during second chunk of long packet\n", status);
 				return status;
 			}
-			
+
 			nb_read = min(bytesRemaining, fragMaxLen);
 			memcpy (zena_packet->packet + write_offset, usbbuf + selected_profile->data_offset, nb_read);
 			bytesRemaining -= nb_read;
@@ -382,7 +395,7 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 		}
 	}
 
-	if (selected_profile->product_id == ZENA_CC2420_HW_PID) { // hold HW
+	if (selected_profile->product_id == ZENA_CC2420_HW_PID) { // old HW
 		zena_packet->rssi = zena_packet->packet[data_len-2];
 		zena_packet->lqi = zena_packet->packet[data_len-1]&0x7f;
 		zena_packet->fcs_ok = zena_packet->packet[data_len-1]&80 ? TRUE : FALSE;
@@ -398,7 +411,7 @@ int zena_get_packet (libusb_device_handle *zena,  zena_packet_t *zena_packet) {
 }
 
 /**
- * Display help and usage information. 
+ * Display help and usage information.
  */
 void usage () {
 	fprintf (stderr,"\n");
@@ -430,7 +443,7 @@ void version () {
 }
 
 /**
- * Display debug message if suitable log level is selected. 
+ * Display debug message if suitable log level is selected.
  * Use vararg mechanism to allow use similar to the fprintf()
  * function.
  *
@@ -449,9 +462,10 @@ void debug (int level, const char* msg, ...) {
 	fflush(stderr);
 	va_end(args);
 }
+
 /**
  * Display warning message if unless quiet_mode is enabled.
- * 
+ *
  * @param msg  Format string as described in fprintf()
  */
 void warning (const char* msg, ...) {
@@ -490,7 +504,7 @@ int main( int argc, char **argv) {
 
 	int c;
 
-	// Setup signal handler. Catching SIGPIPE allows for exit when 
+	// Setup signal handler. Catching SIGPIPE allows for exit when
 	// piping to Wireshark for live packet feed.
 	//signal(SIGPIPE, signal_handler);
 	struct sigaction act;
@@ -525,7 +539,7 @@ int main( int argc, char **argv) {
 					fprintf(stderr,"ERROR: unrecognized output format '%s'. Only pcap or usbhex allowed.\n",optarg);
 					exit(-1);
 				}
-            	break;
+            			break;
 			case 'h':
 				version();
 				usage();
@@ -589,21 +603,23 @@ int main( int argc, char **argv) {
 
 	// Write PCAP header
 	if (format == FORMAT_PCAP) {
-		fwrite(&PCAP_MAGIC, sizeof(int), 1, stdout);    
+		fwrite(&PCAP_MAGIC, sizeof(int), 1, stdout);
 		fwrite(&PCAP_VERSION_MAJOR, sizeof(short), 1, stdout);
 		fwrite(&PCAP_VERSION_MINOR, sizeof(short), 1, stdout);
-		fwrite(&PCAP_TZ, sizeof(int), 1, stdout);				// thiszone: GMT to local correction
+		fwrite(&PCAP_TZ, sizeof(int), 1, stdout);			// thiszone: GMT to local correction
 		fwrite(&PCAP_SIGFIGS, sizeof(int), 1, stdout);			// sigfigs: accuracy of timestamps
 		fwrite(&PCAP_SNAPLEN, sizeof(int), 1, stdout);			// snaplen: max len of packets, in octets
-		fwrite(&PCAP_LINKTYPE, sizeof(int), 1, stdout);		// data link type
+		fwrite(&PCAP_LINKTYPE, sizeof(int), 1, stdout);			// data link type
 	}
 
-	int i,j,data_len,packet_len,packet_len_plus_2,ts_sec,ts_usec;
+	int idx_i;
+	int data_len, packet_len, packet_len_plus_2;
+	int ts_sec,ts_usec;
 
 	// Allocate buffer for usb_interrupt_read requests
-	unsigned char usbbuf[64];
+	unsigned char usbbuf[ZENA_USB_BUFFER_SIZE];
 	//unsigned char packetbuf[128];
-	
+
 	// Get start time of capture. Won't worry about subsecond resolution for this.
 	struct timespec tp;
 	clock_gettime(CLOCK_REALTIME, &tp);
@@ -621,8 +637,8 @@ int main( int argc, char **argv) {
 	while ( ! exit_flag ) {
 
 		// If scan_mode is TRUE, cycle through all the 802.15.4 channels looking
-		// for packets. For some reason it seems to be necessary to close the 
-		// USB device and libusb library and reopen it for the channel change to 
+		// for packets. For some reason it seems to be necessary to close the
+		// USB device and libusb library and reopen it for the channel change to
 		// work reliably. Why?
 
 		if (scan_mode) {
@@ -632,7 +648,7 @@ int main( int argc, char **argv) {
 				channel = 11;
 			}
 
-			// It seems to be necessary to reset libusb (close library and 
+			// It seems to be necessary to reset libusb (close library and
 			// re-initialize it) for zena_set_channel() to be successful.
 			debug(9,"Closing ZENA to facilitate 802.15.4 channel change");
 			libusb_close (zena);
@@ -643,29 +659,29 @@ int main( int argc, char **argv) {
 				fprintf (stderr, "ERROR: unable to reopen ZENA during 80.15.4 channel change\n");
 				exit(EXIT_FAILURE);
 			}
-	
+
 			debug (1,"Setting 802.15.4 channel to %d",channel);
 			status = zena_set_channel(zena,channel);
 			if (status<0) {
 				fprintf (stderr,"ERROR: error setting 802.15.4 channel to %d during scan, errorCode=%d\n",channel, status);
 				exit(EXIT_FAILURE);
-			} 
+			}
 
 			// TODO: bug - we can have packet received from the
 			// previous 802.15.4 channel in the buffer at this
 			// point. When outputted it will be incorrectly
 			// tagged with the new channel number. Can we purge
 			// the buffer somehow?
-			
+
 		}
 
 		switch (format) {
 
 			case FORMAT_USBHEX:
-				
-				bzero(usbbuf, 64);
-				
-				status = selected_profile->transfer(zena, selected_profile->ep_packets, usbbuf, 64, &nbytes, usb_timeout);
+
+				bzero(usbbuf, ZENA_USB_BUFFER_SIZE);
+
+				status = selected_profile->transfer(zena, selected_profile->ep_packets, usbbuf, ZENA_USB_BUFFER_SIZE, &nbytes, usb_timeout);
 				// check for timeout and silently ignore
 				if (status == LIBUSB_ERROR_TIMEOUT) {
 					debug(9,"libusb_transfer(): timeout");
@@ -691,16 +707,17 @@ int main( int argc, char **argv) {
 				// 802.15.4 channel
 				fprintf (stdout, "%02x ", channel);
 
-				// Echo USB 64 byte packet to screen. Each byte as hex separated by space. 
+				// Echo USB ZENA_USB_BUFFER_SIZE byte packet to screen. Each byte as hex separated by space.
 				// One line per packet.
-				for (j = 0; j < 64; j++) {
-					fprintf (stdout, "%02x ", usbbuf[j] & 0xff);
+				for (idx_i = 0; idx_i < ZENA_USB_BUFFER_SIZE; idx_i++) {
+					fprintf (stdout, "%02x ", usbbuf[idx_i] & 0xff);
 				}
 				fprintf (stdout, "\n");
 				fflush (stdout);
 				break;
 
 			case FORMAT_PCAP:
+
 				status = zena_get_packet (zena, &zena_packet);
 				if (status == LIBUSB_ERROR_TIMEOUT) {
 					// A timeout is a normal event. No action.
@@ -716,11 +733,11 @@ int main( int argc, char **argv) {
 				//Lu: added case of 0 byte length here which causes tshark to crash
 				zena_packet.packet_len &= 0xff;
 				if (zena_packet.packet_len > 125 || zena_packet.packet_len == 0) {
-					fprintf (stderr,"ERROR: invalid packet length, len=%d\n",zena_packet.packet_len);
+					fprintf (stderr, "ERROR: invalid packet length, len=%d\n", zena_packet.packet_len);
 					break;
 				}
 
-				if (  ( ! zena_packet.fcs_ok) && drop_bad_packets ) {
+				if ( (!zena_packet.fcs_ok) && drop_bad_packets ) {
 					warning ("dropping corrupted packet\n");
 					break;
 				}
@@ -741,36 +758,36 @@ int main( int argc, char **argv) {
 					fwrite (&packet_len_plus_2, sizeof(int), 1, stdout);
 					fwrite (zena_packet.packet, 1, zena_packet.packet_len, stdout);
 				} else
-					
+
 				// Small problem re FCS. Old HW ZENA does not provide this information.
 				// Solution is in the case of a good packet not to include FCS
-				// and Wireshark will ignore it. In the case were the FCS is 
+				// and Wireshark will ignore it. In the case were the FCS is
 				// known to be bad, we'll include a deliberatly wrong FCS. For
 				// the moment this will be a fixed value (0x0000), but ideally
 				// it should be computed from the packet and the +1 to guarantee
 				// it is a bad FCS.
-					
+
 					if (zena_packet.fcs_ok) {
-					packet_len_plus_2 = zena_packet.packet_len + 2;
-					
-					// write packet excluding FCS
-					fwrite (&zena_packet.packet_len, sizeof(int), 1, stdout);
-					fwrite (&packet_len_plus_2, sizeof(int), 1, stdout);	// full frame included 2 FCS octets
-					fwrite (zena_packet.packet, 1, zena_packet.packet_len, stdout);
-				} else {
-					packet_len_plus_2 = zena_packet.packet_len + 2;
-					
-					// two extra bytes for deliberately wrong FCS
-					fwrite (&packet_len_plus_2, sizeof(int), 1, stdout);
-					fwrite (&packet_len_plus_2, sizeof(int), 1, stdout);
-					zena_packet.packet[zena_packet.packet_len] = 0;
-					zena_packet.packet[zena_packet.packet_len+1] = 0;
-					fwrite (zena_packet.packet, 1, packet_len_plus_2, stdout);
-				}
+						packet_len_plus_2 = zena_packet.packet_len + 2;
+
+						// write packet excluding FCS
+						fwrite (&zena_packet.packet_len, sizeof(int), 1, stdout);
+						fwrite (&packet_len_plus_2, sizeof(int), 1, stdout);	// full frame included 2 FCS octets
+						fwrite (zena_packet.packet, 1, zena_packet.packet_len, stdout);
+					} else {
+						packet_len_plus_2 = zena_packet.packet_len + 2;
+
+						// two extra bytes for deliberately wrong FCS
+						fwrite (&packet_len_plus_2, sizeof(int), 1, stdout);
+						fwrite (&packet_len_plus_2, sizeof(int), 1, stdout);
+
+						zena_packet.packet[zena_packet.packet_len] = 0;
+						zena_packet.packet[zena_packet.packet_len+1] = 0;
+						fwrite (zena_packet.packet, 1, packet_len_plus_2, stdout);
+					}
 
 				fflush(stdout);
 				break;
-
 
 		} // end switch
 
@@ -784,5 +801,5 @@ int main( int argc, char **argv) {
 	libusb_exit(NULL);
 
 	debug (1, "Normal exit");
-	return EXIT_SUCCESS; 
+	return EXIT_SUCCESS;
 }
